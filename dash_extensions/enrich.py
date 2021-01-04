@@ -359,16 +359,18 @@ def _prep_props(callbacks, key):
 # endregion
 
 # region Server side output transform
+DEFAULT_CACHE_ARGS = ['output', 'func', 'args', 'session']
+
 
 class EnrichedOutput(Output):
     """
      Like a normal Output, includes additional properties related to storing the data.
     """
 
-    def __init__(self, component_id, component_property, backend=None, session_check=None):
+    def __init__(self, component_id, component_property, backend=None, cache_args=DEFAULT_CACHE_ARGS):
         super().__init__(component_id, component_property)
         self.backend = backend
-        self.session_check = session_check
+        self.cache_args = cache_args
 
 
 class ServersideOutput(EnrichedOutput):
@@ -379,9 +381,9 @@ class ServersideOutput(EnrichedOutput):
 
 class ServersideOutputTransform(DashTransform):
 
-    def __init__(self, backend=None, session_check=True):
+    def __init__(self, backend=None, cache_args=DEFAULT_CACHE_ARGS):
         self.backend = backend if backend is not None else FileSystemStore()
-        self.session_check = session_check
+        self.cache_args = cache_args
 
     def init(self, dt):
         # Set session secret (if not already set).
@@ -404,8 +406,10 @@ class ServersideOutputTransform(DashTransform):
                 # Set default values.
                 if not isinstance(output, ServersideOutput) and not memoize:
                     continue
-                output.backend = output.backend if output.backend is not None else self.backend
-                output.session_check = output.session_check if output.session_check is not None else self.session_check
+                if output.backend is None:
+                    output.backend = self.backend
+                if output.cache_args is None:
+                    output.cache_args = self.cache_args
             # Keep track of server side callbacks.
             if serverside or memoize:
                 serverside_callbacks.append(callback)
@@ -472,7 +476,7 @@ def _pack_outputs(callback):
                     is_trigger = trigger_filter(callback["sorted_args"])
                     filtered_args = [arg for i, arg in enumerate(args) if not is_trigger[i]]
                     # Generate unique ID.
-                    unique_id = _get_cache_id(f, output, list(filtered_args), output.session_check)
+                    unique_id = _get_cache_id(f, output, list(filtered_args), output.cache_args)
                     unique_ids.append(unique_id)
                     if not output.backend.has(unique_id):
                         update_needed = True
@@ -494,7 +498,7 @@ def _pack_outputs(callback):
                     # Filter out Triggers (a little ugly to do here, should ideally be handled elsewhere).
                     is_trigger = trigger_filter(callback["sorted_args"])
                     filtered_args = [arg for i, arg in enumerate(args) if not is_trigger[i]]
-                    unique_id = _get_cache_id(f, output, list(filtered_args), output.session_check)
+                    unique_id = _get_cache_id(f, output, list(filtered_args), output.cache_args)
                     output.backend.set(unique_id, data[i])
                     # Replace only for server side outputs.
                     if serverside_output:
@@ -506,10 +510,16 @@ def _pack_outputs(callback):
     return packed_callback
 
 
-def _get_cache_id(func, output, args, session_check=None):
-    all_args = [func.__name__, _create_callback_id(output)] + list(args)
-    if session_check:
-        all_args += [_get_session_id()]
+def _get_cache_id(func, output, args, cache_args=DEFAULT_CACHE_ARGS):
+    all_args = []
+    if 'func' in cache_args:
+        all_args.append(func.__name__)
+    if 'output' in cache_args:
+        all_args.append(_create_callback_id(output))
+    if 'args' in cache_args:
+        all_args += list(args)
+    if 'session' in cache_args:
+        all_args.append(_get_session_id())
     return hashlib.md5(json.dumps(all_args).encode()).hexdigest()
 
 
@@ -580,7 +590,8 @@ class NoOutputTransform(DashTransform):
 
 class Dash(DashProxy):
     def __init__(self, *args, output_defaults=None, **kwargs):
-        output_defaults = dict(backend=None, session_check=True) if output_defaults is None else output_defaults
+        if output_defaults is None:
+            output_defaults = dict(backend=None, cache_args=DEFAULT_CACHE_ARGS)
         transforms = [TriggerTransform(), NoOutputTransform(), GroupTransform(),
                       ServersideOutputTransform(**output_defaults)]
         super().__init__(*args, transforms=transforms, **kwargs)
