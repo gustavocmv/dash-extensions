@@ -367,7 +367,7 @@ class EnrichedOutput(Output):
      Like a normal Output, includes additional properties related to storing the data.
     """
 
-    def __init__(self, component_id, component_property, backend=None, cache_args=DEFAULT_CACHE_ARGS):
+    def __init__(self, component_id, component_property, backend=None, cache_args=None):
         super().__init__(component_id, component_property)
         self.backend = backend
         self.cache_args = cache_args
@@ -510,7 +510,7 @@ def _pack_outputs(callback):
     return packed_callback
 
 
-def _get_cache_id(func, output, args, cache_args=DEFAULT_CACHE_ARGS):
+def _get_cache_id(func, output, args, cache_args=DEFAULT_CACHE_ARGS):  
     all_args = []
     if 'func' in cache_args:
         all_args.append(func.__name__)
@@ -520,7 +520,10 @@ def _get_cache_id(func, output, args, cache_args=DEFAULT_CACHE_ARGS):
         all_args += list(args)
     if 'session' in cache_args:
         all_args.append(_get_session_id())
-    return hashlib.md5(json.dumps(all_args).encode()).hexdigest()
+
+    cache_id = hashlib.md5(json.dumps(all_args).encode()).hexdigest()
+
+    return cache_id
 
 
 # Interface definition for server stores.
@@ -589,9 +592,7 @@ class NoOutputTransform(DashTransform):
 # region Transformer implementations
 
 class Dash(DashProxy):
-    def __init__(self, *args, output_defaults=None, **kwargs):
-        if output_defaults is None:
-            output_defaults = dict(backend=None, cache_args=DEFAULT_CACHE_ARGS)
+    def __init__(self, *args, output_defaults=dict(backend=None, cache_args=DEFAULT_CACHE_ARGS), **kwargs):
         transforms = [TriggerTransform(), NoOutputTransform(), GroupTransform(),
                       ServersideOutputTransform(**output_defaults)]
         super().__init__(*args, transforms=transforms, **kwargs)
